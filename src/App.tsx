@@ -22,6 +22,7 @@ import {
   type SyncStatus,
 } from "./api";
 import { Icon, type IconName } from "./icons";
+import { applyTheme, getTheme, type Theme } from "./theme";
 import logo from "./assets/logo.png";
 import { Archive, Detail, Library, Settings, SyncView, Targets } from "./views";
 import "./styles.css";
@@ -56,6 +57,7 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [sheet, setSheet] = useState<SheetState | null>(null);
   const [sheetInput, setSheetInput] = useState("");
+  const [theme, setTheme] = useState<Theme>(getTheme);
   const toastTimer = useRef<number | undefined>(undefined);
 
   const showToast = useCallback((message: string) => {
@@ -320,7 +322,17 @@ export default function App() {
         <SyncView data={data} sync={sync} onConnect={connectSync} onSync={runSync} />
       );
     return (
-      <Settings data={data} sync={sync} onChangeRoot={() => void changeRoot()} />
+      <Settings
+        data={data}
+        sync={sync}
+        theme={theme}
+        onChangeRoot={() => void changeRoot()}
+        onTheme={(next) => {
+          setTheme(next);
+          applyTheme(next);
+        }}
+        onToast={showToast}
+      />
     );
   };
 

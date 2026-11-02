@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 
 export type Status = "link" | "copy" | "none";
 
@@ -82,6 +83,8 @@ export const syncStatus = () => invoke<SyncStatus>("sync_status");
 export const connectRemote = (remote: string, username: string, token: string) =>
   invoke<SyncStatus>("connect_remote", { remote, username, token });
 export const syncNow = () => invoke<SyncStatus>("sync_now");
+export const autostartEnabled = () => isEnabled();
+export const setAutostart = (on: boolean) => (on ? enable() : disable());
 
 export function formatSize(bytes: number): string {
   if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;

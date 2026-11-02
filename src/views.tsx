@@ -1,8 +1,10 @@
-import { useState, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useState, type CSSProperties, type FormEvent } from "react";
 import {
+  autostartEnabled,
   formatDate,
   formatHome,
   formatSize,
+  setAutostart,
   skillColor,
   skillGlyph,
   type AgentInfo,
@@ -12,6 +14,7 @@ import {
   type SyncStatus,
 } from "./api";
 import { Icon, type IconName } from "./icons";
+import type { Theme } from "./theme";
 import claudeIcon from "./assets/agents/claude.svg";
 import cursorIcon from "./assets/agents/cursor.svg";
 import deepseekIcon from "./assets/agents/deepseek.svg";
@@ -49,6 +52,12 @@ const statusMeta: Record<Status, { label: string; icon: IconName }> = {
   copy: { label: "独立副本", icon: "copy" },
   none: { label: "未安装", icon: "dash" },
 };
+
+const THEMES: { value: Theme; label: string }[] = [
+  { value: "system", label: "跟随系统" },
+  { value: "light", label: "浅色" },
+  { value: "dark", label: "深色" },
+];
 
 function SkillIcon({ skill, index, big }: { skill: SkillInfo; index: number; big?: boolean }) {
   const style = { "--c": skillColor(index) } as CSSProperties;
@@ -825,24 +834,94 @@ export function SyncView({
 export function Settings({
   data,
   sync,
+  theme,
   onChangeRoot,
+  onTheme,
+  onToast,
 }: {
   data: ScanResult;
   sync: SyncStatus | null;
+  theme: Theme;
   onChangeRoot: () => void;
+  onTheme: (theme: Theme) => void;
+  onToast: (message: string) => void;
 }) {
   const remote = sync?.remote ?? null;
   const isHttps = remote?.startsWith("https://") ?? false;
+  const [auto, setAuto] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    autostartEnabled()
+      .then(setAuto)
+      .catch(() => setAuto(false));
+  }, []);
+
+  const toggleAuto = async () => {
+    const next = !auto;
+    setAuto(next);
+    try {
+      await setAutostart(next);
+    } catch (error) {
+      setAuto(!next);
+      onToast(String(error));
+    }
+  };
 
   return (
     <div className="page">
       <div className="page-head">
         <div>
           <h1>设置</h1>
-          <p className="sub">中央库、同步与凭据。</p>
+          <p className="sub">外观、启动、中央库、同步与凭据。</p>
         </div>
       </div>
       <div style={{ display: "grid", gap: 18 }}>
+        <section className="group">
+          <div className="group-head">
+            <b>通用</b>
+          </div>
+          <div className="setrow">
+            <div className="s-t">
+              <b>主题</b>
+              <p>跟随系统，或固定使用浅色、深色。</p>
+            </div>
+            <div className="seg" role="group" aria-label="主题">
+              {THEMES.map((item) => (
+                <button
+                  key={item.value}
+                  className={theme === item.value ? "on" : undefined}
+                  aria-pressed={theme === item.value}
+                  onClick={() => onTheme(item.value)}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="setrow">
+            <div className="s-t">
+              <b>开机自启</b>
+              <p>登录 Windows 后在后台启动，从托盘打开主窗口。</p>
+            </div>
+            <button
+              className={auto ? "switch on" : "switch"}
+              role="switch"
+              aria-checked={auto === true}
+              aria-label="开机自启"
+              disabled={auto === null}
+              onClick={() => void toggleAuto()}
+            >
+              <i />
+            </button>
+          </div>
+          <div className="setrow">
+            <div className="s-t">
+              <b>关闭窗口</b>
+              <p>关闭时隐藏到系统托盘；退出请使用托盘菜单。</p>
+            </div>
+            <span className="val">隐藏到托盘</span>
+          </div>
+        </section>
         <section className="group">
           <div className="group-head">
             <b>中央库</b>

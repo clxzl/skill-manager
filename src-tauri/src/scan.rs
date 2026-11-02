@@ -224,13 +224,21 @@ fn clean_inline(text: &str) -> String {
         .join(" ")
 }
 
+/// 中央库中的技能条目允许是指向目录的链接（如 ego-browser 的 junction），
+/// 判定时只跟随这一层；技能内部的链接仍不跟随，避免越出允许范围。
+fn is_dir_entry(entry: &fs::DirEntry) -> bool {
+    entry.file_type().is_ok_and(|t| t.is_dir())
+        || (entry.file_type().is_ok_and(|t| t.is_symlink())
+            && fs::metadata(entry.path()).is_ok_and(|m| m.is_dir()))
+}
+
 fn scan_skills(root: &Path) -> Vec<SkillInfo> {
     let Ok(entries) = fs::read_dir(root) else {
         return Vec::new();
     };
     let mut skills: Vec<SkillInfo> = entries
         .flatten()
-        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .filter(is_dir_entry)
         // 中央库即 Git 工作区，.git 不是技能
         .filter(|e| e.file_name() != ".git")
         .map(|entry| {
@@ -290,7 +298,7 @@ fn central_index(root: &Path) -> HashMap<String, PathBuf> {
     };
     entries
         .flatten()
-        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .filter(is_dir_entry)
         .filter_map(|entry| {
             fs::canonicalize(entry.path())
                 .ok()
@@ -771,6 +779,32 @@ mod tests {
         let result = scan(&root, tmp.path());
         assert!(result.skills.iter().all(|s| s.name != ".git"));
         assert_eq!(result.skills.len(), 2);
+    }
+
+    #[test]
+    fn scan_lists_skill_that_is_directory_link() {
+        let tmp = setup();
+        let root = tmp.path().join(".agents/skills");
+        let external = tmp.path().join("ego/ego-browser");
+        fs::create_dir_all(&external).unwrap();
+        fs::write(
+            external.join("SKILL.md"),
+            "---\nname: ego-browser\ndescription: Ego 浏览器\n---\n",
+        )
+        .unwrap();
+        let target = fs::canonicalize(&external).unwrap();
+        make_link(&target, &root.join("ego-browser")).unwrap();
+        make_link(&target, &tmp.path().join(".claude/skills/ego-browser")).unwrap();
+
+        let result = scan(&root, tmp.path());
+        let skill = result
+            .skills
+            .iter()
+            .find(|s| s.name == "ego-browser")
+            .expect("目录链接形式的技能应出现在列表中");
+        assert_eq!(skill.description, "Ego 浏览器");
+        assert_eq!(skill.agents["claude"], SkillStatus::Link);
+        assert!(result.orphans.iter().all(|o| o.name != "ego-browser"));
     }
 
     #[test]
