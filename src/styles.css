@@ -497,6 +497,23 @@ h1 {
   font-size: 12px;
   color: var(--ink3);
 }
+.group-head .gh-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.gh-title .btn {
+  height: 24px;
+  font-size: 12px;
+}
+svg.i.spin {
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(430px, 1fr));

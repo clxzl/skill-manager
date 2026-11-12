@@ -304,6 +304,7 @@ export default function App() {
           onAdd={addFromRepo}
           onMergeAll={mergeAll}
           onSeeOrphans={() => setView("targets")}
+          onRefresh={refresh}
         />
       );
     }

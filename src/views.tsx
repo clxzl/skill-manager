@@ -95,14 +95,17 @@ export function Library({
   onAdd,
   onMergeAll,
   onSeeOrphans,
+  onRefresh,
 }: {
   data: ScanResult;
   onOpen: (name: string) => void;
   onAdd: () => void;
   onMergeAll: (skills: string[]) => void;
   onSeeOrphans: () => void;
+  onRefresh: () => Promise<void>;
 }) {
   const [query, setQuery] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
   const totals = countByStatus(data);
   const copiesBySkill = data.skills
     .filter((skill) => Object.values(skill.agents).includes("copy"))
@@ -186,7 +189,20 @@ export function Library({
       )}
       <section className="group">
         <div className="group-head">
-          <b>全部技能</b>
+          <span className="gh-title">
+            <b>全部技能</b>
+            <button
+              className="btn ghost"
+              disabled={refreshing}
+              onClick={() => {
+                setRefreshing(true);
+                void onRefresh().finally(() => setRefreshing(false));
+              }}
+            >
+              <Icon name="sync" className={refreshing ? "spin" : undefined} />
+              刷新
+            </button>
+          </span>
           <span>单击卡片查看安装位置</span>
         </div>
         {filtered.length > 0 && (
