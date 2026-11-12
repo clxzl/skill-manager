@@ -305,6 +305,10 @@ export default function App() {
           onMergeAll={mergeAll}
           onSeeOrphans={() => setView("targets")}
           onRefresh={refresh}
+          onArchive={archiveCurrent}
+          onReveal={(name) => {
+            revealSkill(name).catch((error) => showToast(String(error)));
+          }}
         />
       );
     }

@@ -96,6 +96,8 @@ export function Library({
   onMergeAll,
   onSeeOrphans,
   onRefresh,
+  onArchive,
+  onReveal,
 }: {
   data: ScanResult;
   onOpen: (name: string) => void;
@@ -103,6 +105,8 @@ export function Library({
   onMergeAll: (skills: string[]) => void;
   onSeeOrphans: () => void;
   onRefresh: () => Promise<void>;
+  onArchive: (name: string) => void;
+  onReveal: (name: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const [refreshing, setRefreshing] = useState(false);
@@ -213,7 +217,20 @@ export function Library({
                 (agent) => skill.agents[agent.id] === "copy",
               ).length;
               return (
-                <button className="card" key={skill.name} onClick={() => onOpen(skill.name)}>
+                <div
+                  className="card"
+                  key={skill.name}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onOpen(skill.name)}
+                  onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget) return;
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      onOpen(skill.name);
+                    }
+                  }}
+                >
                   <div className="card-head">
                     <SkillIcon skill={skill} index={data.skills.indexOf(skill)} />
                     <span className="nm">
@@ -222,6 +239,28 @@ export function Library({
                         {formatSize(skill.sizeBytes)} · {skill.files.toLocaleString()} 个文件 ·{" "}
                         {formatDate(skill.modified)}修改
                       </em>
+                    </span>
+                    <span className="card-acts">
+                      <button
+                        title="归档"
+                        aria-label={`归档 ${skill.name}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onArchive(skill.name);
+                        }}
+                      >
+                        <Icon name="archive" />
+                      </button>
+                      <button
+                        title="在资源管理器中显示"
+                        aria-label={`在资源管理器中显示 ${skill.name}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onReveal(skill.name);
+                        }}
+                      >
+                        <Icon name="open" />
+                      </button>
                     </span>
                     <span className="chev">
                       <Icon name="chev" />
@@ -244,7 +283,7 @@ export function Library({
                       {linked.length === 0 && copies === 0 && <span className="none">未安装</span>}
                     </span>
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>

@@ -530,6 +530,7 @@ svg.i.spin {
   border-radius: 14px;
   background: var(--surface);
   text-align: left;
+  cursor: pointer;
   transition:
     border-color 0.15s,
     box-shadow 0.15s;
@@ -657,6 +658,27 @@ svg.i.spin {
   width: 16px;
   height: 16px;
   stroke-width: 2;
+}
+.card-acts {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.card-acts button {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  color: var(--ink3);
+}
+.card-acts button:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.card-acts svg {
+  width: 15px;
+  height: 15px;
 }
 
 @media (max-width: 900px) {
