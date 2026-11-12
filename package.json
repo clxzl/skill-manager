@@ -1,12 +1,13 @@
 {
   "name": "skill-manager",
   "private": true,
-  "version": "0.1.2",
+  "version": "0.1.7",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "typecheck": "tsc --noEmit",
+    "test": "node scripts/check-auto-sync.ts",
     "preview": "vite preview",
     "tauri": "tauri"
   },

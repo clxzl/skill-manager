@@ -15,6 +15,7 @@ Built with Tauri 2, React 19, TypeScript, and Rust.
 - **Archive and restore**: move skills you do not need right now into an archive (default `~/.agents/archive`) and restore them later. Permanent deletion goes through the system recycle bin.
 - **Install from a repository**: accepts `skill@owner/repo`, `owner/repo`, `https://github.com/owner/repo`, and `file://` URLs. Detects either a root `SKILL.md` or `skills/*/SKILL.md`, installs from a shallow clone, and never copies `.git`.
 - **Git sync**: commits local changes, fetches and rebases onto the remote branch, then pushes. On conflict, the sync stops and lists the conflicting files for manual resolution. Force push is never used.
+- **Auto-sync**: optional background sync every 5/10/30/60 minutes (off by default), configured in Settings. Keeps running on schedule while the window is hidden to the tray.
 - **Credential safety**: access tokens are written only to Windows Credential Manager, never to the config file or logs.
 
 ## Download
@@ -31,7 +32,7 @@ Requirements: Windows 10/11 x64. Windows 10 requires the WebView2 Runtime. The i
 1. **Check the central library**: on first launch it defaults to `~/.agents/skills`; change it to any existing absolute path in Settings.
 2. **Add skills**: copy existing skill folders into the central library, or click **Add skill** and install from a Git repository.
 3. **Create links**: on the **Agents** page, select the agents that should see a skill. If an agent already has a real directory with the same name, replace it with a link.
-4. **Turn on sync**: on the **Sync** page, enter the remote URL, username, and access token, connect, then click **Sync now**.
+4. **Turn on sync**: on the **Sync** page, enter the remote URL, username, and access token, connect, then click **Sync now**. Optionally enable auto-sync in **Settings › Sync**.
 
 ### Installing from a repository
 
@@ -51,6 +52,7 @@ A root `SKILL.md` is installed under the repository name; otherwise every `skill
 - Sync runs `git add -A` → commit (`sync: 首次推送 N 个技能` or `sync: 更新 N 个技能`) → `fetch` → `rebase origin/<branch>` → `push`.
 - On conflict it runs `rebase --abort`, pushes nothing, and reports the conflicting files. Resolve them with an external Git tool and retry.
 - If the remote already has history while the local library is empty, the app adopts the remote history instead of overwriting it.
+- Auto-sync reuses the same flow on a fixed interval; conflicts stop it and surface a notification. Force push is never used.
 
 ## Development
 
@@ -67,6 +69,7 @@ pnpm tauri dev          # development mode
 pnpm tauri build        # build installers
 
 pnpm typecheck          # TypeScript type check
+pnpm test               # frontend self-check
 cargo test --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
 ```
@@ -92,7 +95,7 @@ The first `pnpm tauri build` downloads the NSIS/WiX bundling tools automatically
 - Windows only.
 - Sync requires Git and a working credential manager (Git Credential Manager) on the machine.
 - Conflicts must be resolved manually with an external Git tool; the app does not auto-merge.
-- There is no background auto-sync; sync is triggered manually from the **Sync** page.
+- Auto-sync runs on a fixed interval; there is no file-level real-time watching.
 
 ## Project layout
 

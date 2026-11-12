@@ -9,6 +9,7 @@ import {
   deleteArchived,
   formatHome,
   mergeCopies,
+  removeLink,
   removeOrphans,
   replaceWithLink,
   restoreSkill,
@@ -23,6 +24,7 @@ import {
 } from "./api";
 import { Icon, type IconName } from "./icons";
 import { applyTheme, getTheme, type Theme } from "./theme";
+import { getAutoSync, setAutoSync as saveAutoSync, type AutoSyncSetting } from "./autoSync";
 import logo from "./assets/logo.png";
 import { Archive, Detail, Library, Settings, SyncView, Targets } from "./views";
 import "./styles.css";
@@ -58,7 +60,10 @@ export default function App() {
   const [sheet, setSheet] = useState<SheetState | null>(null);
   const [sheetInput, setSheetInput] = useState("");
   const [theme, setTheme] = useState<Theme>(getTheme);
+  const [autoSync, setAutoSyncState] = useState<AutoSyncSetting>(getAutoSync);
+  const [tidying, setTidying] = useState(false);
   const toastTimer = useRef<number | undefined>(undefined);
+  const syncingRef = useRef(false);
 
   const showToast = useCallback((message: string) => {
     setToast(message);
@@ -120,6 +125,11 @@ export default function App() {
   };
 
   const connectSync = async (remote: string, username: string, token: string) => {
+    if (syncingRef.current) {
+      showToast("正在同步，请稍候再连接");
+      return false;
+    }
+    syncingRef.current = true;
     showToast("正在连接…");
     try {
       setSync(await connectRemote(remote, username, token));
@@ -128,22 +138,42 @@ export default function App() {
     } catch (error) {
       showToast(String(error));
       return false;
+    } finally {
+      syncingRef.current = false;
     }
   };
 
-  const runSync = async () => {
-    showToast("正在同步…");
-    try {
-      setSync(await syncNow());
-      setData(await scanLibrary());
-      showToast("同步完成");
-      return true;
-    } catch (error) {
-      showToast(String(error));
-      void syncStatus().then(setSync).catch(() => {});
-      return false;
-    }
+  const runSync = useCallback(
+    async (silent = false) => {
+      if (syncingRef.current) return false;
+      syncingRef.current = true;
+      if (!silent) showToast("正在同步…");
+      try {
+        setSync(await syncNow());
+        setData(await scanLibrary());
+        if (!silent) showToast("同步完成");
+        return true;
+      } catch (error) {
+        showToast(String(error));
+        void syncStatus().then(setSync).catch(() => {});
+        return false;
+      } finally {
+        syncingRef.current = false;
+      }
+    },
+    [showToast],
+  );
+
+  const changeAutoSync = (next: AutoSyncSetting) => {
+    setAutoSyncState(next);
+    saveAutoSync(next);
   };
+
+  useEffect(() => {
+    if (!autoSync.enabled || !sync?.remote) return;
+    const timer = window.setInterval(() => void runSync(true), autoSync.minutes * 60_000);
+    return () => window.clearInterval(timer);
+  }, [autoSync, sync?.remote, runSync]);
 
   const current = data?.skills.find((skill) => skill.name === detail) ?? null;
   const totalFiles = data?.skills.reduce((sum, skill) => sum + skill.files, 0) ?? 0;
@@ -171,6 +201,61 @@ export default function App() {
     });
   };
 
+  const tidyAll = () => {
+    if (!data || tidying) return;
+    const strays = data.strays;
+    const strayNames = [...new Set(strays.map((item) => item.name))];
+    const copyNames = data.skills
+      .filter((skill) => Object.values(skill.agents).includes("copy"))
+      .map((skill) => skill.name);
+    const names = [...new Set([...strayNames, ...copyNames])];
+    if (names.length === 0) {
+      showToast("无需整理：技能都在中央库，Agent 目录只有链接");
+      return;
+    }
+    const parts: string[] = [];
+    if (strayNames.length > 0) parts.push(`收集 ${strayNames.length} 个未入库技能（${strayNames.join("、")}）`);
+    if (copyNames.length > 0) parts.push(`合并 ${copyNames.length} 个技能的独立副本（${copyNames.join("、")}）`);
+    setSheet({
+      title: `一键整理 ${names.length} 个技能？`,
+      desc: `${parts.join("；")}。整理后 Agent 目录只保留指向中央库的链接。`,
+      warn: "Agent 里的原件与副本会移到回收站，可恢复；同名技能以先入库的版本为准。",
+      confirmLabel: "开始整理",
+      onConfirm: async () => {
+        setTidying(true);
+        const total = strays.length + copyNames.length;
+        let step = 0;
+        let latest: ScanResult = data;
+        try {
+          for (const stray of strays) {
+            step += 1;
+            showToast(`整理中… ${step}/${total}`);
+            if (!latest.skills.some((skill) => skill.name === stray.name)) {
+              latest = await addSkill(stray.path);
+            }
+            latest = await replaceWithLink(stray.name, stray.agent);
+          }
+          const copies = latest.skills
+            .filter((skill) => Object.values(skill.agents).includes("copy"))
+            .map((skill) => skill.name);
+          for (const name of copies) {
+            step += 1;
+            showToast(`整理中… ${step}/${total}`);
+            latest = await mergeCopies(name);
+          }
+          setData(latest);
+          setLoadError(null);
+          showToast(`整理完成：入库 ${strayNames.length} 个，合并副本 ${copies.length} 个`);
+        } catch (error) {
+          setData(latest);
+          showToast(`整理中断：${String(error)}`);
+        } finally {
+          setTidying(false);
+        }
+      },
+    });
+  };
+
   const replaceCopy = (skill: string, agent: string) => {
     const agentName = data?.agents.find((item) => item.id === agent)?.name ?? agent;
     setSheet({
@@ -179,6 +264,62 @@ export default function App() {
       warn: "副本会移到回收站，然后创建链接。",
       confirmLabel: "替换为链接",
       onConfirm: () => apply(() => replaceWithLink(skill, agent), "已替换为链接"),
+    });
+  };
+
+  const removeAgentLink = (skill: string, agent: string) => {
+    const agentName = data?.agents.find((item) => item.id === agent)?.name ?? agent;
+    setSheet({
+      title: "取消链接？",
+      desc: `${agentName} 中的 ${skill} 链接会被移除，中央库技能不受影响。`,
+      confirmLabel: "取消链接",
+      onConfirm: () => apply(() => removeLink(skill, agent), "已取消链接"),
+    });
+  };
+
+  const linkAllAgents = async (skill: string, agents: string[]) => {
+    if (agents.length === 0) {
+      showToast("没有需要建立链接的 Agent");
+      return;
+    }
+    showToast("处理中…");
+    let latest: ScanResult | null = null;
+    try {
+      for (const agent of agents) latest = await createLink(skill, agent);
+      if (latest) setData(latest);
+      showToast(`已链接 ${agents.length} 个 Agent`);
+    } catch (error) {
+      if (latest) setData(latest);
+      showToast(String(error));
+    }
+  };
+
+  const unlinkAllAgents = (skill: string, agents: string[]) => {
+    if (agents.length === 0) {
+      showToast("没有可取消的链接");
+      return;
+    }
+    setSheet({
+      title: `取消 ${agents.length} 个链接？`,
+      desc: `${skill} 在这 ${agents.length} 个 Agent 目录中的链接会被移除，中央库技能不受影响。`,
+      confirmLabel: "全部取消链接",
+      onConfirm: async () => {
+        showToast("取消链接中… 0/" + agents.length);
+        let latest: ScanResult | null = null;
+        try {
+          let step = 0;
+          for (const agent of agents) {
+            step += 1;
+            showToast(`取消链接中… ${step}/${agents.length}`);
+            latest = await removeLink(skill, agent);
+          }
+          if (latest) setData(latest);
+          showToast(`已取消 ${agents.length} 个链接`);
+        } catch (error) {
+          if (latest) setData(latest);
+          showToast(String(error));
+        }
+      },
     });
   };
 
@@ -283,6 +424,9 @@ export default function App() {
           onCreateLink={(agent) =>
             void apply(() => createLink(current.name, agent), "已创建链接")
           }
+          onRemoveLink={(agent) => removeAgentLink(current.name, agent)}
+          onLinkAll={(agents) => void linkAllAgents(current.name, agents)}
+          onUnlinkAll={(agents) => unlinkAllAgents(current.name, agents)}
           onReplace={(agent) => replaceCopy(current.name, agent)}
           onReveal={() => {
             revealSkill(current.name).catch((error) => showToast(String(error)));
@@ -303,6 +447,8 @@ export default function App() {
           onOpen={setDetail}
           onAdd={addFromRepo}
           onMergeAll={mergeAll}
+          onTidy={tidyAll}
+          tidying={tidying}
           onSeeOrphans={() => setView("targets")}
           onRefresh={refresh}
           onArchive={archiveCurrent}
@@ -324,13 +470,15 @@ export default function App() {
     }
     if (view === "sync")
       return (
-        <SyncView data={data} sync={sync} onConnect={connectSync} onSync={runSync} />
+        <SyncView data={data} sync={sync} autoSync={autoSync} onConnect={connectSync} onSync={runSync} />
       );
     return (
       <Settings
         data={data}
         sync={sync}
         theme={theme}
+        autoSync={autoSync}
+        onChangeAutoSync={changeAutoSync}
         onChangeRoot={() => void changeRoot()}
         onTheme={(next) => {
           setTheme(next);

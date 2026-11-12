@@ -46,6 +46,14 @@ pub struct OrphanLink {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct StraySkill {
+    pub agent: String,
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScanResult {
     pub home: String,
     pub central_root: String,
@@ -54,6 +62,7 @@ pub struct ScanResult {
     pub skills: Vec<SkillInfo>,
     pub archived: Vec<SkillInfo>,
     pub orphans: Vec<OrphanLink>,
+    pub strays: Vec<StraySkill>,
 }
 
 pub fn agents(home: &Path, root: &Path) -> Vec<AgentInfo> {
@@ -98,6 +107,7 @@ pub fn scan(root: &Path, home: &Path) -> ScanResult {
     let mut skills = scan_skills(root);
     let archive = archive_dir(root);
     let mut orphans = Vec::new();
+    let mut strays = Vec::new();
     let central = central_index(root);
 
     for agent in &agents {
@@ -134,10 +144,16 @@ pub fn scan(root: &Path, home: &Path) -> ScanResult {
                     name,
                     target,
                 });
-            } else if ft.is_dir()
-                && let Some(skill) = skills.iter_mut().find(|s| s.name == name)
-            {
-                skill.agents.insert(agent.id.clone(), SkillStatus::Copy);
+            } else if ft.is_dir() {
+                if let Some(skill) = skills.iter_mut().find(|s| s.name == name) {
+                    skill.agents.insert(agent.id.clone(), SkillStatus::Copy);
+                } else if path.join("SKILL.md").is_file() {
+                    strays.push(StraySkill {
+                        agent: agent.id.clone(),
+                        name,
+                        path: path.to_string_lossy().into_owned(),
+                    });
+                }
             }
         }
     }
@@ -159,6 +175,7 @@ pub fn scan(root: &Path, home: &Path) -> ScanResult {
         skills,
         archived: scan_skills(&archive),
         orphans,
+        strays,
     }
 }
 
@@ -354,6 +371,21 @@ pub fn create_link(root: &Path, home: &Path, skill: &str, agent: &str) -> Result
         return Err(AppError::Msg("目标位置已有同名条目".into()));
     }
     make_link(&target, &link)
+}
+
+/// 只删除指向中央库的链接；副本与外部链接一律不动
+pub fn remove_link(root: &Path, home: &Path, skill: &str, agent: &str) -> Result<(), AppError> {
+    let target = skill_dir(root, skill)?;
+    let agent = find_agent(root, home, agent)?;
+    let link = Path::new(&agent.dir).join(skill);
+    let md = fs::symlink_metadata(&link).map_err(|_| AppError::Msg("未找到链接".into()))?;
+    if !md.file_type().is_symlink()
+        || fs::canonicalize(&link).ok().as_deref() != Some(target.as_path())
+    {
+        return Err(AppError::Msg("目标不是指向中央库的链接".into()));
+    }
+    fs::remove_dir(&link).or_else(|_| fs::remove_file(&link))?;
+    Ok(())
 }
 
 pub fn replace_with_link(
@@ -693,6 +725,74 @@ mod tests {
 
         assert_eq!(result.orphans.len(), 1);
         assert_eq!(result.orphans[0].name, "gone");
+        assert!(result.strays.is_empty());
+    }
+
+    #[test]
+    fn scan_collects_stray_skill_dirs() {
+        let tmp = setup();
+        let root = tmp.path().join(".agents/skills");
+        let claude = tmp.path().join(".claude/skills");
+        fs::create_dir_all(claude.join("gamma")).unwrap();
+        fs::write(claude.join("gamma/SKILL.md"), "gamma").unwrap();
+        fs::create_dir_all(tmp.path().join(".qoder/skills/not-a-skill")).unwrap();
+
+        let result = scan(&root, tmp.path());
+        assert_eq!(result.strays.len(), 1);
+        assert_eq!(result.strays[0].agent, "claude");
+        assert_eq!(result.strays[0].name, "gamma");
+        assert!(result.strays[0].path.ends_with("gamma"));
+        assert!(result.skills.iter().all(|s| s.name != "gamma"));
+    }
+
+    #[test]
+    fn remove_link_only_removes_managed_links() {
+        let tmp = setup();
+        let root = tmp.path().join(".agents/skills");
+        let claude = tmp.path().join(".claude/skills");
+
+        assert!(remove_link(&root, tmp.path(), "beta", "claude").is_err());
+        assert!(claude.join("beta").is_dir());
+        assert!(remove_link(&root, tmp.path(), "gone", "claude").is_err());
+
+        remove_link(&root, tmp.path(), "alpha", "claude").unwrap();
+        assert!(fs::symlink_metadata(claude.join("alpha")).is_err());
+        assert!(root.join("alpha/SKILL.md").is_file());
+        let result = scan(&root, tmp.path());
+        assert_eq!(
+            result
+                .skills
+                .iter()
+                .find(|s| s.name == "alpha")
+                .unwrap()
+                .agents["claude"],
+            SkillStatus::None
+        );
+    }
+
+    #[test]
+    fn tidy_stray_into_central_and_link() {
+        let tmp = setup();
+        let root = tmp.path().join(".agents/skills");
+        let claude = tmp.path().join(".claude/skills");
+        fs::create_dir_all(claude.join("gamma")).unwrap();
+        fs::write(claude.join("gamma/SKILL.md"), "gamma").unwrap();
+
+        let stray = scan(&root, tmp.path()).strays.remove(0);
+        add_skill(&root, &stray.path).unwrap();
+        replace_with_link(&root, tmp.path(), "gamma", "claude").unwrap();
+
+        let result = scan(&root, tmp.path());
+        assert!(result.strays.is_empty());
+        assert_eq!(
+            result
+                .skills
+                .iter()
+                .find(|s| s.name == "gamma")
+                .unwrap()
+                .agents["claude"],
+            SkillStatus::Link
+        );
     }
 
     #[test]

@@ -14,6 +14,7 @@ import {
   type SyncStatus,
 } from "./api";
 import { Icon, type IconName } from "./icons";
+import { AUTO_SYNC_INTERVALS, type AutoSyncSetting } from "./autoSync";
 import type { Theme } from "./theme";
 import claudeIcon from "./assets/agents/claude.svg";
 import cursorIcon from "./assets/agents/cursor.svg";
@@ -94,6 +95,8 @@ export function Library({
   onOpen,
   onAdd,
   onMergeAll,
+  onTidy,
+  tidying,
   onSeeOrphans,
   onRefresh,
   onArchive,
@@ -103,6 +106,8 @@ export function Library({
   onOpen: (name: string) => void;
   onAdd: () => void;
   onMergeAll: (skills: string[]) => void;
+  onTidy: () => void;
+  tidying: boolean;
   onSeeOrphans: () => void;
   onRefresh: () => Promise<void>;
   onArchive: (name: string) => void;
@@ -205,6 +210,11 @@ export function Library({
             >
               <Icon name="sync" className={refreshing ? "spin" : undefined} />
               刷新
+            </button>
+            <button className="btn ghost" disabled={tidying} onClick={onTidy}>
+              一键整理
+              {data.strays.length + totals.copies > 0 &&
+                `（${data.strays.length + totals.copies}）`}
             </button>
           </span>
           <span>单击卡片查看安装位置</span>
@@ -310,6 +320,9 @@ export function Detail({
   skill,
   onBack,
   onCreateLink,
+  onRemoveLink,
+  onLinkAll,
+  onUnlinkAll,
   onReplace,
   onReveal,
   onRevealAgent,
@@ -321,6 +334,9 @@ export function Detail({
   skill: SkillInfo;
   onBack: () => void;
   onCreateLink: (agent: string) => void;
+  onRemoveLink: (agent: string) => void;
+  onLinkAll: (agents: string[]) => void;
+  onUnlinkAll: (agents: string[]) => void;
   onReplace: (agent: string) => void;
   onReveal: () => void;
   onRevealAgent: (agent: string) => void;
@@ -330,6 +346,10 @@ export function Detail({
 }) {
   const index = data.skills.indexOf(skill);
   const absolute = `${data.centralRoot}\\${skill.name}`;
+  const unlinked = data.agents.filter(
+    (agent) => (skill.agents[agent.id] ?? "none") === "none",
+  );
+  const linked = data.agents.filter((agent) => skill.agents[agent.id] === "link");
 
   return (
     <div className="page">
@@ -368,7 +388,21 @@ export function Detail({
         <div className="colmain">
           <section className="group">
             <div className="group-head">
-              <b>安装位置</b>
+              <span className="gh-title">
+                <b>安装位置</b>
+                <button
+                  className="btn ghost"
+                  onClick={() => onLinkAll(unlinked.map((agent) => agent.id))}
+                >
+                  全部链接{unlinked.length > 0 && `（${unlinked.length}）`}
+                </button>
+                <button
+                  className="btn ghost"
+                  onClick={() => onUnlinkAll(linked.map((agent) => agent.id))}
+                >
+                  全部取消链接{linked.length > 0 && `（${linked.length}）`}
+                </button>
+              </span>
               <span>{data.agents.length} 个 Agent</span>
             </div>
             {data.agents.map((agent) => {
@@ -388,9 +422,14 @@ export function Detail({
                     {meta.label}
                   </span>
                   {status === "link" && (
-                    <button className="btn ghost" onClick={() => onRevealAgent(agent.id)}>
-                      打开目录
-                    </button>
+                    <>
+                      <button className="btn ghost" onClick={() => onRevealAgent(agent.id)}>
+                        打开目录
+                      </button>
+                      <button className="btn ghost" onClick={() => onRemoveLink(agent.id)}>
+                        取消链接
+                      </button>
+                    </>
                   )}
                   {status === "copy" && (
                     <button className="btn ghost" onClick={() => onReplace(agent.id)}>
@@ -646,11 +685,13 @@ export function Archive({
 export function SyncView({
   data,
   sync,
+  autoSync,
   onConnect,
   onSync,
 }: {
   data: ScanResult;
   sync: SyncStatus | null;
+  autoSync: AutoSyncSetting;
   onConnect: (remote: string, username: string, token: string) => Promise<boolean>;
   onSync: () => Promise<boolean>;
 }) {
@@ -794,6 +835,11 @@ export function SyncView({
                   : "未保存访问令牌，推送可能失败；点「更换仓库」重新填写"
                 : "使用 SSH 密钥认证，由系统 ssh-agent 管理"}
             </p>
+            <p className="credline">
+              {autoSync.enabled
+                ? `自动同步：每 ${autoSync.minutes} 分钟，隐藏到托盘后仍会运行`
+                : "自动同步：未开启，可在「设置 › 同步」中打开"}
+            </p>
           </div>
           <div className="hero-actions">
             <button className="btn primary" onClick={() => void runNow()} disabled={busy}>
@@ -890,6 +936,8 @@ export function Settings({
   data,
   sync,
   theme,
+  autoSync,
+  onChangeAutoSync,
   onChangeRoot,
   onTheme,
   onToast,
@@ -897,6 +945,8 @@ export function Settings({
   data: ScanResult;
   sync: SyncStatus | null;
   theme: Theme;
+  autoSync: AutoSyncSetting;
+  onChangeAutoSync: (next: AutoSyncSetting) => void;
   onChangeRoot: () => void;
   onTheme: (theme: Theme) => void;
   onToast: (message: string) => void;
@@ -1019,6 +1069,39 @@ export function Settings({
             <span className="val">
               {remote ? <code>{remote}</code> : sync && !sync.gitAvailable ? "缺少 Git" : "未连接"}
             </span>
+          </div>
+          <div className="setrow">
+            <div className="s-t">
+              <b>自动同步</b>
+              <p>按间隔在后台自动同步；未连接远端时不运行，冲突时停止并提醒。</p>
+            </div>
+            <button
+              className={autoSync.enabled ? "switch on" : "switch"}
+              role="switch"
+              aria-checked={autoSync.enabled}
+              aria-label="自动同步"
+              onClick={() => onChangeAutoSync({ ...autoSync, enabled: !autoSync.enabled })}
+            >
+              <i />
+            </button>
+          </div>
+          <div className="setrow">
+            <div className="s-t">
+              <b>同步间隔</b>
+              <p>窗口隐藏到托盘后仍按时同步。</p>
+            </div>
+            <div className="seg" role="group" aria-label="同步间隔">
+              {AUTO_SYNC_INTERVALS.map((minutes) => (
+                <button
+                  key={minutes}
+                  className={autoSync.minutes === minutes ? "on" : undefined}
+                  aria-pressed={autoSync.minutes === minutes}
+                  onClick={() => onChangeAutoSync({ ...autoSync, minutes })}
+                >
+                  {minutes} 分钟
+                </button>
+              ))}
+            </div>
           </div>
           <div className="setrow">
             <div className="s-t">

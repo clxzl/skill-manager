@@ -111,6 +111,17 @@ fn create_link(
 }
 
 #[tauri::command]
+fn remove_link(
+    skill: String,
+    agent: String,
+    state: State<AppState>,
+) -> Result<ScanResult, AppError> {
+    let root = state.root();
+    scan::remove_link(&root, &state.home, &skill, &agent)?;
+    Ok(scan::scan(&root, &state.home))
+}
+
+#[tauri::command]
 fn replace_with_link(
     skill: String,
     agent: String,
@@ -293,6 +304,7 @@ pub fn run() {
             scan_library,
             set_central_root,
             create_link,
+            remove_link,
             replace_with_link,
             merge_copies,
             remove_orphans,

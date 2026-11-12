@@ -25,6 +25,12 @@ export interface OrphanLink {
   target: string;
 }
 
+export interface StraySkill {
+  agent: string;
+  name: string;
+  path: string;
+}
+
 export interface ScanResult {
   home: string;
   centralRoot: string;
@@ -33,6 +39,7 @@ export interface ScanResult {
   skills: SkillInfo[];
   archived: SkillInfo[];
   orphans: OrphanLink[];
+  strays: StraySkill[];
 }
 
 export interface SyncCommit {
@@ -59,6 +66,8 @@ export const setCentralRoot = (path: string) =>
   invoke<ScanResult>("set_central_root", { path });
 export const createLink = (skill: string, agent: string) =>
   invoke<ScanResult>("create_link", { skill, agent });
+export const removeLink = (skill: string, agent: string) =>
+  invoke<ScanResult>("remove_link", { skill, agent });
 export const replaceWithLink = (skill: string, agent: string) =>
   invoke<ScanResult>("replace_with_link", { skill, agent });
 export const mergeCopies = (skill: string) =>
