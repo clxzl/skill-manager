@@ -1,5 +1,6 @@
 mod scan;
 mod sync;
+mod upstream;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -146,14 +147,14 @@ fn remove_orphans(agent: String, state: State<AppState>) -> Result<ScanResult, A
     Ok(scan::scan(&root, &state.home))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn add_skill(source: String, state: State<AppState>) -> Result<ScanResult, AppError> {
     let root = state.root();
     scan::add_skill(&root, &source)?;
     Ok(scan::scan(&root, &state.home))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn add_skill_repo(source: String, state: State<AppState>) -> Result<ScanResult, AppError> {
     let root = state.root();
     scan::add_skill_from_repo(&root, &source)?;
@@ -181,13 +182,36 @@ fn delete_archived(skill: String, state: State<AppState>) -> Result<ScanResult, 
     Ok(scan::scan(&root, &state.home))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
+fn check_updates(state: State<AppState>) -> upstream::UpdateReport {
+    upstream::check_updates(&state.root())
+}
+
+#[tauri::command(async)]
+fn update_skill(skill: String, state: State<AppState>) -> Result<ScanResult, AppError> {
+    let root = state.root();
+    upstream::update_skill(&root, &skill)?;
+    Ok(scan::scan(&root, &state.home))
+}
+
+#[tauri::command(async)]
+fn attach_source(
+    skill: String,
+    source: String,
+    state: State<AppState>,
+) -> Result<ScanResult, AppError> {
+    let root = state.root();
+    upstream::attach_source(&root, &skill, &source)?;
+    Ok(scan::scan(&root, &state.home))
+}
+
+#[tauri::command(async)]
 fn sync_status(state: State<AppState>) -> SyncStatus {
     let status = sync::status(&state.root());
     decorate(status, &state.config.lock().unwrap())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn connect_remote(
     remote: String,
     username: String,
@@ -206,7 +230,7 @@ fn connect_remote(
     Ok(decorate(sync::status(&root), &config))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn sync_now(state: State<AppState>) -> Result<SyncStatus, AppError> {
     let root = state.root();
     let skills = scan::scan(&root, &state.home).skills.len();
@@ -313,6 +337,9 @@ pub fn run() {
             archive_skill,
             restore_skill,
             delete_archived,
+            check_updates,
+            update_skill,
+            attach_source,
             sync_status,
             connect_remote,
             sync_now,

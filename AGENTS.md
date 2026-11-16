@@ -33,6 +33,7 @@ cargo test  --manifest-path src-tauri/Cargo.toml
 - Windows 链接优先用 junction；只链单个 skill；不覆盖已有真实目录；删除只删链接，不删中央库内容。
 - 不 force push；推送前先 pull；冲突交给用户处理；凭据不落盘、不进日志。
 - 提交信息使用中文，格式 `sync: <描述>`。
+- 版本号只在发布版本包（如 GitHub Release）时更新；本地构建、覆盖安装、日常改动一律沿用当前版本，不随意升版本。
 - 领域决策不明确时先问用户，不自行扩大范围。
 
 ## 当前状态

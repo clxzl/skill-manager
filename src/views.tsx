@@ -10,6 +10,7 @@ import {
   type AgentInfo,
   type ScanResult,
   type SkillInfo,
+  type SkillUpdate,
   type Status,
   type SyncStatus,
 } from "./api";
@@ -101,6 +102,10 @@ export function Library({
   onRefresh,
   onArchive,
   onReveal,
+  updates,
+  checking,
+  onCheckUpdates,
+  onUpdate,
 }: {
   data: ScanResult;
   onOpen: (name: string) => void;
@@ -112,6 +117,10 @@ export function Library({
   onRefresh: () => Promise<void>;
   onArchive: (name: string) => void;
   onReveal: (name: string) => void;
+  updates: Record<string, SkillUpdate>;
+  checking: boolean;
+  onCheckUpdates: () => void;
+  onUpdate: (name: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const [refreshing, setRefreshing] = useState(false);
@@ -128,7 +137,9 @@ export function Library({
       <div className="page-head">
         <div>
           <h1>技能库</h1>
-          <p className="sub">中央库是唯一真实副本，链接分发到 {data.agents.length} 个 Agent。</p>
+          <p className="sub">
+            中央库是唯一真实副本，链接分发到 {data.agents.length} 个 Agent。单击卡片查看安装位置。
+          </p>
         </div>
         <div className="head-actions">
           <button className="btn primary" onClick={onAdd}>
@@ -196,10 +207,13 @@ export function Library({
           )}
         </div>
       )}
-      <section className="group">
+      <section className="group plain">
         <div className="group-head">
           <span className="gh-title">
             <b>全部技能</b>
+            <span className="count">{filtered.length} 个</span>
+          </span>
+          <span className="gh-tools">
             <button
               className="btn ghost"
               disabled={refreshing}
@@ -216,8 +230,15 @@ export function Library({
               {data.strays.length + totals.copies > 0 &&
                 `（${data.strays.length + totals.copies}）`}
             </button>
+            <button
+              className="btn secondary"
+              disabled={checking}
+              onClick={onCheckUpdates}
+            >
+              <Icon name="sync" className={checking ? "spin" : undefined} />
+              检查更新
+            </button>
           </span>
-          <span>单击卡片查看安装位置</span>
         </div>
         {filtered.length > 0 && (
           <div className="cards">
@@ -226,6 +247,7 @@ export function Library({
               const copies = data.agents.filter(
                 (agent) => skill.agents[agent.id] === "copy",
               ).length;
+              const update = updates[skill.name];
               return (
                 <div
                   className="card"
@@ -251,6 +273,18 @@ export function Library({
                       </em>
                     </span>
                     <span className="card-acts">
+                      {update && (
+                        <button
+                          title={`更新到 ${update.latest.slice(0, 7)}`}
+                          aria-label={`更新 ${skill.name}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onUpdate(skill.name);
+                          }}
+                        >
+                          <Icon name="sync" />
+                        </button>
+                      )}
                       <button
                         title="归档"
                         aria-label={`归档 ${skill.name}`}
@@ -279,6 +313,12 @@ export function Library({
                   {skill.description && <p className="card-desc">{skill.description}</p>}
                   <div className="card-foot">
                     <span className="left">
+                      {update && (
+                        <span className="pill link">
+                          <Icon name="sync" />
+                          有更新
+                        </span>
+                      )}
                       {linked.length > 0 && (
                         <span className="stack">
                           {linked.slice(0, 6).map((agent) => (
@@ -329,6 +369,11 @@ export function Detail({
   onCopyPath,
   onOpenSync,
   onArchive,
+  update,
+  checking,
+  onCheckUpdates,
+  onUpdate,
+  onAttachSource,
 }: {
   data: ScanResult;
   skill: SkillInfo;
@@ -343,6 +388,11 @@ export function Detail({
   onCopyPath: () => void;
   onOpenSync: () => void;
   onArchive: () => void;
+  update?: SkillUpdate;
+  checking: boolean;
+  onCheckUpdates: () => void;
+  onUpdate: () => void;
+  onAttachSource: () => void;
 }) {
   const index = data.skills.indexOf(skill);
   const absolute = `${data.centralRoot}\\${skill.name}`;
@@ -445,9 +495,32 @@ export function Detail({
               );
             })}
           </section>
+        </div>
+        <div className="colside">
           <section className="group">
             <div className="group-head">
               <b>详细信息</b>
+              {skill.source ? (
+                <span className="gh-title">
+                  <button
+                    className="btn ghost"
+                    disabled={checking}
+                    onClick={onCheckUpdates}
+                  >
+                    <Icon name="sync" className={checking ? "spin" : undefined} />
+                    检查更新
+                  </button>
+                  {update && (
+                    <button className="btn ghost" onClick={onUpdate}>
+                      更新到 {update.latest.slice(0, 7)}
+                    </button>
+                  )}
+                </span>
+              ) : (
+                <button className="btn ghost" onClick={onAttachSource}>
+                  关联更新来源
+                </button>
+              )}
             </div>
             <div className="irow">
               <span className="k">大小</span>
@@ -461,6 +534,26 @@ export function Detail({
               <span className="k">修改时间</span>
               <span className="v">{formatDate(skill.modified)}</span>
             </div>
+            {skill.source && (
+              <>
+                <div className="irow">
+                  <span className="k">更新来源</span>
+                  <span className="v">
+                    <code>
+                      {skill.source.repo}
+                      {skill.source.subdir ? ` / ${skill.source.subdir}` : ""}
+                    </code>
+                  </span>
+                </div>
+                <div className="irow">
+                  <span className="k">已装版本</span>
+                  <span className="v">
+                    <code>{skill.source.commit.slice(0, 7)}</code>
+                    {update && ` → ${update.latest.slice(0, 7)}`}
+                  </span>
+                </div>
+              </>
+            )}
             <div className="irow">
               <span className="k">中央库</span>
               <span className="v">
@@ -468,8 +561,6 @@ export function Detail({
               </span>
             </div>
           </section>
-        </div>
-        <div className="colside">
           <section className="group">
             <div className="group-head">
               <b>文件</b>

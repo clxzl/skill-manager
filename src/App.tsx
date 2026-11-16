@@ -4,6 +4,8 @@ import {
   addSkill,
   addSkillRepo,
   archiveSkill,
+  attachSource,
+  checkUpdates,
   connectRemote,
   createLink,
   deleteArchived,
@@ -19,7 +21,9 @@ import {
   setCentralRoot,
   syncNow,
   syncStatus,
+  updateSkill,
   type ScanResult,
+  type SkillUpdate,
   type SyncStatus,
 } from "./api";
 import { Icon, type IconName } from "./icons";
@@ -62,6 +66,8 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>(getTheme);
   const [autoSync, setAutoSyncState] = useState<AutoSyncSetting>(getAutoSync);
   const [tidying, setTidying] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [updates, setUpdates] = useState<Record<string, SkillUpdate>>({});
   const toastTimer = useRef<number | undefined>(undefined);
   const syncingRef = useRef(false);
 
@@ -387,6 +393,71 @@ export default function App() {
     });
   };
 
+  const checkAllUpdates = async () => {
+    if (checking) return;
+    setChecking(true);
+    showToast("正在检查更新…");
+    try {
+      const report = await checkUpdates();
+      setUpdates(
+        Object.fromEntries(report.updates.map((item) => [item.name, item])),
+      );
+      if (report.errors.length > 0) {
+        showToast(
+          `部分仓库检查失败：${report.errors[0]}${
+            report.errors.length > 1 ? ` 等 ${report.errors.length} 个` : ""
+          }`,
+        );
+      } else if (report.updates.length === 0) {
+        showToast("没有发现可更新的技能");
+      } else {
+        showToast(`${report.updates.length} 个技能有更新`);
+      }
+    } catch (error) {
+      showToast(String(error));
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const updateNow = (name: string) => {
+    const update = updates[name];
+    if (!update) return;
+    const warn = update.localChangesKnown
+      ? update.localChanges.length > 0
+        ? `本地有 ${update.localChanges.length} 处改动会被覆盖：${update.localChanges
+            .slice(0, 5)
+            .join("、")}${update.localChanges.length > 5 ? " 等" : ""}。旧版本会移到系统回收站。`
+        : "旧版本会移到系统回收站。"
+      : "无法判断本地改动，更新会覆盖技能目录内容；旧版本会移到系统回收站。";
+    setSheet({
+      title: `更新 ${name}？`,
+      desc: `将拉取 ${update.repo} 的最新版本：${update.installed.slice(0, 7)} → ${update.latest.slice(0, 7)}。`,
+      warn,
+      confirmLabel: "更新",
+      onConfirm: async () => {
+        if (await apply(() => updateSkill(name), "已更新")) {
+          setUpdates((prev) => {
+            const next = { ...prev };
+            delete next[name];
+            return next;
+          });
+        }
+      },
+    });
+  };
+
+  const attachSourceNow = (name: string) => {
+    setSheetInput("");
+    setSheet({
+      title: `关联 ${name} 的更新来源`,
+      desc: "输入技能所在的 Git 仓库（owner/repo 或 https 链接）。当前远端版本会记为基线，之后可以在技能库检查更新。",
+      inputPlaceholder: "https://github.com/owner/repo 或 技能名@owner/repo",
+      confirmLabel: "关联",
+      onConfirm: (input) => apply(() => attachSource(name, input), "已关联更新来源"),
+    });
+  };
+
   const archiveCurrent = (name: string) => {
     setSheet({
       title: "归档技能？",
@@ -440,6 +511,11 @@ export default function App() {
             setView("sync");
             setDetail(null);
           }}
+          update={updates[current.name]}
+          checking={checking}
+          onCheckUpdates={() => void checkAllUpdates()}
+          onUpdate={() => updateNow(current.name)}
+          onAttachSource={() => attachSourceNow(current.name)}
         />
       ) : (
         <Library
@@ -455,6 +531,10 @@ export default function App() {
           onReveal={(name) => {
             revealSkill(name).catch((error) => showToast(String(error)));
           }}
+          updates={updates}
+          checking={checking}
+          onCheckUpdates={() => void checkAllUpdates()}
+          onUpdate={updateNow}
         />
       );
     }

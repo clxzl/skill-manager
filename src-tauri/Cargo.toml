@@ -1,6 +1,6 @@
 [package]
 name = "skill-manager"
-version = "0.1.7"
+version = "0.2.0"
 description = "Local skill manager for AI agents"
 authors = ["you"]
 edition = "2024"

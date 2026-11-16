@@ -10,6 +10,12 @@ export interface AgentInfo {
   dir: string;
 }
 
+export interface SkillSource {
+  repo: string;
+  subdir: string;
+  commit: string;
+}
+
 export interface SkillInfo {
   name: string;
   description: string;
@@ -17,6 +23,21 @@ export interface SkillInfo {
   files: number;
   modified: number;
   agents: Record<string, Status>;
+  source: SkillSource | null;
+}
+
+export interface SkillUpdate {
+  name: string;
+  repo: string;
+  installed: string;
+  latest: string;
+  localChanges: string[];
+  localChangesKnown: boolean;
+}
+
+export interface UpdateReport {
+  updates: SkillUpdate[];
+  errors: string[];
 }
 
 export interface OrphanLink {
@@ -84,6 +105,11 @@ export const restoreSkill = (skill: string) =>
   invoke<ScanResult>("restore_skill", { skill });
 export const deleteArchived = (skill: string) =>
   invoke<ScanResult>("delete_archived", { skill });
+export const checkUpdates = () => invoke<UpdateReport>("check_updates");
+export const updateSkill = (skill: string) =>
+  invoke<ScanResult>("update_skill", { skill });
+export const attachSource = (skill: string, source: string) =>
+  invoke<ScanResult>("attach_source", { skill, source });
 export const revealSkill = (skill: string) =>
   invoke<void>("reveal_skill", { skill });
 export const revealAgent = (agent: string) =>

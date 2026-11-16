@@ -6,6 +6,7 @@ use std::time::UNIX_EPOCH;
 
 use serde::Serialize;
 
+use crate::upstream;
 use crate::AppError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -34,6 +35,7 @@ pub struct SkillInfo {
     pub files: u64,
     pub modified: i64,
     pub agents: BTreeMap<String, SkillStatus>,
+    pub source: Option<upstream::SourceInfo>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -243,7 +245,7 @@ fn clean_inline(text: &str) -> String {
 
 /// 中央库中的技能条目允许是指向目录的链接（如 ego-browser 的 junction），
 /// 判定时只跟随这一层；技能内部的链接仍不跟随，避免越出允许范围。
-fn is_dir_entry(entry: &fs::DirEntry) -> bool {
+pub(crate) fn is_dir_entry(entry: &fs::DirEntry) -> bool {
     entry.file_type().is_ok_and(|t| t.is_dir())
         || (entry.file_type().is_ok_and(|t| t.is_symlink())
             && fs::metadata(entry.path()).is_ok_and(|m| m.is_dir()))
@@ -268,6 +270,7 @@ fn scan_skills(root: &Path) -> Vec<SkillInfo> {
                 files,
                 modified,
                 agents: BTreeMap::new(),
+                source: upstream::source_info(&path),
             }
         })
         .collect();
@@ -289,6 +292,9 @@ fn dir_stats(dir: &Path) -> (u64, u64, i64) {
                 continue;
             };
             if ft.is_symlink() {
+                continue;
+            }
+            if entry.file_name() == upstream::SOURCE_FILE {
                 continue;
             }
             if ft.is_dir() {
@@ -477,7 +483,7 @@ fn install_dir(root: &Path, source: &Path, name: &str) -> Result<(), AppError> {
 }
 
 /// 解析「技能名@owner/repo」、owner/repo 或 https:// 仓库地址，返回（可选技能名, 克隆地址, 仓库名）
-fn parse_repo_input(input: &str) -> Result<(Option<String>, String, String), AppError> {
+pub(crate) fn parse_repo_input(input: &str) -> Result<(Option<String>, String, String), AppError> {
     let input = input.trim();
     if input.is_empty() || input.chars().any(|c| c.is_control() || c.is_whitespace()) {
         return Err(AppError::Msg("请输入仓库地址".into()));
@@ -551,7 +557,9 @@ pub fn add_skill_from_repo(root: &Path, input: &str) -> Result<String, AppError>
         .stdin(Stdio::null())
         .output();
     let result = match out {
-        Ok(out) if out.status.success() => install_from_clone(root, &tmp, &repo_name, preferred.as_deref()),
+        Ok(out) if out.status.success() => {
+            install_from_clone(root, &tmp, &repo_name, &url, preferred.as_deref())
+        }
         Ok(out) => {
             let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
             let message = stderr
@@ -567,12 +575,10 @@ pub fn add_skill_from_repo(root: &Path, input: &str) -> Result<String, AppError>
     result
 }
 
-fn install_from_clone(
-    root: &Path,
+pub(crate) fn repo_candidates(
     clone: &Path,
     repo_name: &str,
-    preferred: Option<&str>,
-) -> Result<String, AppError> {
+) -> Result<Vec<(String, PathBuf)>, AppError> {
     let mut candidates: Vec<(String, PathBuf)> = Vec::new();
     if clone.join("SKILL.md").is_file() {
         candidates.push((repo_name.to_string(), clone.to_path_buf()));
@@ -591,6 +597,17 @@ fn install_from_clone(
             }
         }
     }
+    Ok(candidates)
+}
+
+fn install_from_clone(
+    root: &Path,
+    clone: &Path,
+    repo_name: &str,
+    repo: &str,
+    preferred: Option<&str>,
+) -> Result<String, AppError> {
+    let candidates = repo_candidates(clone, repo_name)?;
     if candidates.is_empty() {
         return Err(AppError::Msg("仓库里没有找到 SKILL.md".into()));
     }
@@ -610,8 +627,23 @@ fn install_from_clone(
             return Err(AppError::Msg(format!("中央库已有同名技能：{name}")));
         }
     }
+    let commit = upstream::head_commit(clone).ok();
     for (name, dir) in &chosen {
         install_dir(root, dir, name)?;
+        if let Some(commit) = &commit {
+            let subdir = dir
+                .strip_prefix(clone)
+                .map(|path| path.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_default();
+            let dest = root.join(name);
+            let source = upstream::SkillSource {
+                repo: repo.to_string(),
+                subdir,
+                commit: commit.clone(),
+                files: upstream::hash_files(&dest).unwrap_or_default(),
+            };
+            let _ = upstream::write_source(&dest, &source);
+        }
     }
     let names: Vec<&str> = chosen.iter().map(|(n, _)| n.as_str()).collect();
     if names.len() == 1 {
@@ -621,7 +653,7 @@ fn install_from_clone(
     }
 }
 
-fn copy_dir(from: &Path, to: &Path) -> Result<(), AppError> {
+pub(crate) fn copy_dir(from: &Path, to: &Path) -> Result<(), AppError> {
     fs::create_dir_all(to)?;
     for entry in fs::read_dir(from)? {
         let entry = entry?;
